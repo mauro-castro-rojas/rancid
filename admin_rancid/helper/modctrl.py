@@ -1,4 +1,5 @@
 #!/usr/bin/python
+import importlib
 import sys, os, json
 import cgi
 from display.displctrl import *
@@ -43,7 +44,8 @@ class Modctrl:
                 mod_file = self.mods[self.current_mod]['run'].get(self.request_uri[2], self.mods[self.current_mod]['run']['default'])
             else:
                 mod_file = self.mods[self.current_mod]['run']['default']
-            _temp = __import__('modules' + '.' + os.path.basename(self.mods[self.current_mod]['dir']) + '.' + mod_file, globals(), locals(), ['main'], -1)
+            module_path = 'modules.' + os.path.basename(self.mods[self.current_mod]['dir']) + '.' + mod_file
+            _temp = importlib.import_module(module_path)
             mod = _temp.main
             tomod = {'dspl' : self.dspl, 'uri' : self.request_uri, 'pwd' : self.pwd, 'moddir' : self.moddir, 'modinfo' : self.mods[self.current_mod], 'root_html' : self.root_html}
             module = mod(tomod)
