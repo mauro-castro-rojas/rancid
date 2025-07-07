@@ -1,0 +1,11 @@
+{
+ "uri" : "rancid",
+ "name" : "RANCID",
+ "tittle" : "RANCID",
+ "menu" : [ ],
+ "requires" : [],
+ "anchors" : [],
+ "run" : {
+   "default" : "main"
+ }
+}

@@ -53,6 +53,14 @@ RUN { \
       echo "ServerName localhost"; \
     } >> /etc/apache2/apache2.conf
 
+RUN find /usr/local/rancid -type f -name "*.py" -exec chmod +x {} +
+
+RUN sed -i \
+    -e 's|ErrorLog .*|ErrorLog /dev/stderr|' \
+    -e 's|CustomLog .*|CustomLog /dev/stdout combined|' \
+    /etc/apache2/apache2.conf
+
+
 # Expose HTTP port and launch Apache
 EXPOSE 80
 CMD ["apache2ctl", "-D", "FOREGROUND"]

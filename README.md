@@ -227,7 +227,159 @@ Without that block, your `.py` files would never be executed by Apache’s CGI e
 
 In your Dockerfile we used `sed` to automatically inject an Apache `<Directory>` section so that `.py` files get executed as CGI without manually editing the virtual-host config.
 
+
+
+Nothing’s actually wrong with Apache—what’s tripping you up is the volume mount. By doing:
+
+```bash
+-v /Users/mauro/rancid:/usr/local/rancid:ro
+```
+
+you’re **shadow-mounting** your (empty) host directory over the image’s `/usr/local/rancid` that you populated at build time. Inside the container you literally have an empty `/usr/local/rancid`, so:
+
+1. **There are no `modctrl.py` or `dsplctr.py` files** for Apache to serve, hence the 403.
+2. Your symlink in `/var/www/html/admin_rancid` points to nothing, so Apache forbids it.
+
+---
+
+### Quick check
+
+Run without the mount:
+
+```bash
+docker run --rm -p 8000:80 rancid-portal
+```
+
+Then exec in and inspect:
+
+```bash
+docker exec -it <container-id> bash
+ls /usr/local/rancid         # you should see all your scripts here
+ls /var/www/html/admin_rancid  # and this should list modctrl.py, etc.
+```
+
+If that looks good, your container‐build is fine.
+
+---
+
+### Options to fix
+
+1. **Don’t mount the entire folder**
+   If you just want to test the baked-in code, omit the `-v` flag.
+
+2. **Mount only what you need**
+   If your host repo really has an `admin_rancid` subfolder, mount just that:
+
+   ```bash
+   docker run --rm -p 8000:80 \
+     -v /Users/mauro/rancid/admin_rancid:/usr/local/rancid/admin_rancid:ro \
+     rancid-portal
+   ```
+
+   That way the built image provides everything else, and you override only the bits you’re actively developing.
+
+3. **Ensure executables & shebang**
+   Make sure your `.py` scripts start with a proper shebang (e.g. `#!/usr/bin/env python3`) and are marked `chmod +x`. Your `rancid-python.conf` already gives `.py` CGI rights, but without an executable bit Apache won’t run them.
+
+Pick the approach that fits your workflow. Once the files actually exist under `/usr/local/rancid/admin_rancid`, the 403 will disappear and your CGI scripts will run.
+
+
+The `-v` (or `--volume`) flag tells Docker to mount a directory (or file) from your **host** into the **container** at runtime. Its basic syntax is:
+
+```
+-v <host_path>:<container_path>[:<options>]
+```
+
+* `<host_path>` is an absolute path on your machine.
+* `<container_path>` is where that directory will appear *inside* the container.
+* The optional `:ro` or `:rw` suffix controls read-only vs. read/write.
+
+So when you did:
+
+```bash
+-v /Users/mauro/rancid:/usr/local/rancid:ro
+```
+
+you effectively **hid** whatever was baked into `/usr/local/rancid` in the image and replaced it with the *empty* host folder. Apache then saw no scripts under `/usr/local/rancid` → 403 Forbidden. If you remove `-v` or point it at a folder that actually contains your `admin_rancid` code, the container will see those files again.
+
+
+
+An Apache “Internal Server Error” (HTTP 500) means your CGI script itself is blowing up, but by default Apache logs those stack traces into its own log files inside the container—so you won’t see them in Docker Desktop’s “Container Logs” (which only shows stdout/stderr). Here’s how to get at the real error:
+
+---
+
+### 1) Inspect Apache’s error log inside the container
+
+1. Run your container in the background with a name:
+
+   ```bash
+   docker run -d \
+     --name rancid-portal \
+     -p 8000:80 \
+     -v /Users/mauro/rancid:/usr/local/rancid:ro \
+     rancid-portal
+   ```
+
+2. Exec a shell in it:
+
+   ```bash
+   docker exec -it rancid-portal bash
+   ```
+
+3. Tail the Apache error log:
+
+   ```bash
+   tail -n 50 /var/log/apache2/error.log
+   ```
+
+   There you’ll see the Python traceback or permission errors from `modctrl.py`.
+
+---
+
+### 2) (Optional) Pipe Apache logs to Docker’s stdout/stderr
+
+If you’d rather have Apache write all errors to the container’s standard output—so that `docker logs rancid-portal` shows them—add one line to your Dockerfile **before** the final `CMD`:
+
+```dockerfile
+# Redirect Apache’s ErrorLog and CustomLog to stderr/stdout
+RUN sed -i \
+    -e 's|ErrorLog .*|ErrorLog /dev/stderr|' \
+    -e 's|CustomLog .*|CustomLog /dev/stdout combined|' \
+    /etc/apache2/apache2.conf
+```
+
+Rebuild & run, and then:
+
+```bash
+docker logs rancid-portal
+```
+
+will include the full Apache stack trace.
+
+---
+
+### 3) Common causes of a 500 in a CGI .py
+
+Once you’ve seen the traceback, look for:
+
+* **Shebang**: first line of `modctrl.py` should be:
+
+  ```bash
+  #!/usr/bin/env python3
+  ```
+* **Executable bit**: ensure the script is `chmod +x` inside `/usr/local/rancid/admin_rancid`.
+* **Python errors**: missing imports, syntax errors, missing configuration files, etc.
+
+Fix the underlying exception and reload—your 500 will turn into a 200 once the script runs cleanly.
+
+
+
+
+
 how to run the container
+
+
+
 
 
 
@@ -237,3 +389,15 @@ docker run \
   -p 8000:80 \
   -v /Users/mauro/rancid:/usr/local/rancid:ro \
   rancid-portal
+
+
+docker run --rm -p 8000:80 rancid-portal
+
+
+docker run --rm -d --name rancid-portal -p 8000:80 rancid-portal
+
+# drop into a shell
+docker exec -it rancid-portal bash
+
+# tail the last 50 lines of Apache’s error log
+tail -n50 /var/log/apache2/error.log
